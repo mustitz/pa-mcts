@@ -1,4 +1,5 @@
 import random
+import time
 
 try:
     import tabulate
@@ -288,3 +289,114 @@ class MctsServer:
 
     def print_jobs(self):
         print(self.dump_jobs())
+
+
+def playout(state, *, log=False, choice=random.choice):
+    state = state.copy()
+    moves = []
+
+    while True:
+        result = state.get_result()
+        if result is not None:
+            if log:
+                print(moves, result)
+            return { 'action': 'PLAYOUT',
+                'result': result,
+                'moves': moves,
+            }
+
+        move = choice(state.gen_moves())
+        moves.append(move)
+        state.do_move(move)
+
+
+def one_playout_analyze(state, moves, *, log=False, choice=random.choice):
+    qmoves = len(moves)
+    estimations = []
+
+    for move in moves:
+        proba = state.copy()
+        proba.do_move(move)
+        if log:
+            print('  ', move, ' playout ', end='')
+        data = playout(proba, log=log, choice=choice)
+
+        result = make_result(data['result'])
+        result = result[state.active]
+        estimations.append([result, 1/qmoves])
+
+    return { 'action': 'ANALIZE',
+        'moves': [ str(move) for move in moves ],
+        'estimations': estimations,
+    }
+
+def void_analyze(state, moves, *, log=False):
+    return { 'action': 'ANALIZE',
+        'moves': [ str(move) for move in moves ],
+        'estimations': [[0,0]] * len(moves),
+    }
+
+ANALYZE_METHODS = {
+    'one_playout': one_playout_analyze,
+    'void': void_analyze,
+}
+
+def analyze(state, *, log=False, method='one_playout', **kwargs):
+    moves = state.gen_moves()
+    qmoves = len(moves)
+
+    if qmoves == 0:
+        return { 'action': 'ANALIZE', 'result': state.get_result() }
+
+    return ANALYZE_METHODS[method](state, moves, log=log, **kwargs)
+
+def exec_job(gs, job, *, log=False, **kwargs):
+    try:
+        if job.action == ANALIZE:
+            if log:
+                print('Analyze:', job.moves)
+            data = analyze(job.state, log=log, **kwargs)
+        elif job.action == PLAYOUT:
+            if log:
+                print('Playout:', job.moves, '', end='')
+            data = playout(job.state, log=log, **kwargs)
+        gs.put_job(job.jid, data)
+        if log:
+            print(data)
+    except:
+        print('Failed JOB:', job.jid, 'data=', data)
+        raise
+
+def run_jobs(gs, *, exec_propability=0.4, qjobs=None, timeout=None, log=False, **kwargs):
+    jobs = []
+    completed = 0
+
+    start = time.time()
+    check_timeout = lambda: timeout is not None and time.time() > start + timeout
+    check_all_done = lambda: qjobs is not None and completed >= qjobs
+    check_all_in_queue = lambda: qjobs is not None and completed + len(jobs) >= qjobs
+
+    while True:
+        is_timeout = check_timeout()
+        is_all_done = check_all_done()
+        is_all_in_queue = check_all_in_queue()
+
+        basta = is_timeout or is_all_done
+        if basta and not jobs:
+            return completed, 'OK'
+
+        if jobs and random.random() > exec_propability:
+            random.shuffle(jobs)
+            job = jobs.pop()
+            exec_job(gs, job, log=log, **kwargs)
+            completed += 1
+            continue
+
+        if not is_all_in_queue:
+            job = gs.get_job()
+            if job.action == PLAYOUT_EXCEEDED and not jobs:
+                return completed, PLAYOUT_EXCEEDED
+            if job.action == WAIT and not jobs:
+                return completed, WAIT
+            if job.action in [PLAYOUT, ANALIZE]:
+                jobs.append(job)
