@@ -1,0 +1,2 @@
+class MctsServer:
+    pass
