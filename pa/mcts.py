@@ -1,3 +1,4 @@
+import numpy as np
 import pickle
 import random
 import time
@@ -136,6 +137,65 @@ class Node:
 class RandomMoveSelection:
     def __call__(self, nodes):
         return random.choice(nodes)
+
+class UcbMoveSelection:
+    def __init__(self, *, C=1.4, weights=(1.0, 1.0), log=False):
+        self.C = C
+        self.weights = weights[:]
+        self.log = log
+
+    def __call__(self, nodes):
+        sum_games = 0
+        qnodes = len(nodes)
+        assert qnodes > 0
+
+        scores = np.zeros((qnodes))
+        qgames = np.zeros((qnodes))
+        zero = []
+
+
+        for i, node in enumerate(nodes):
+            if node.qgames > 0:
+                n = self.weights[0] * node.qgames
+                scores[i] = node.score / node.qgames
+                qgames[i] = n
+                sum_games += n
+            elif node.estimation.weight > 0:
+                n = self.weights[1] * node.estimation.weight
+                scores[i] = node.estimation.value
+                qgames[i] = n
+                sum_games += n
+            else:
+                zero.append(node)
+
+        if zero:
+            return random.choice(zero)
+
+        log_sum_games = np.log(1.0 + sum_games)
+        ucb = scores + self.C * np.sqrt(log_sum_games / qgames)
+        index = np.random.choice(np.flatnonzero(ucb == ucb.max()))
+
+        if self.log:
+            from itertools import count
+
+            print('UcbMoveSelection:')
+            print('=================')
+            print()
+
+            rows = []
+            for i, node, ucb in zip(count(), nodes, ucb):
+                rows.append([i, ucb, '*' if i == index else ' '] + node.dump_row())
+            if TABULATE:
+                columns = ['#', 'UCB', '!', 'view', 'locked', 'score', 'eval', 'qgames', 'qmoves', 'es.value', 'es.weight' ] + [ 'r' + str(i) for i in range(1, 10) ]
+                print(tab(rows, tablefmt='plain', headers=columns))
+            else:
+                print('\n'.join('\t'.join(str(value) for value in row) for row in rows))
+
+            print('SELECTED:', index, '-', nodes[index].view)
+            print()
+
+        return nodes[index]
+
 
 class MctsServer:
     def __init__(self, root_state, *, select_best=RandomMoveSelection()):
