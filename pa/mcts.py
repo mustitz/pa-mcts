@@ -1,3 +1,4 @@
+import pickle
 import random
 import time
 
@@ -268,6 +269,45 @@ class MctsServer:
             child = self.get_node(view)
             child.estimation = Estimation(*estimation)
             job.node.children.append(child)
+
+    def save_nodes(self, path):
+        with open(path, 'wb') as f:
+            for node in self.nodes.values():
+                item = (
+                    node.view,
+                    node.score,
+                    node.qgames,
+                    node.estimation.value,
+                    node.estimation.weight,
+                    node.result,
+                    node.moves,
+                    [child.view for child in node.children],
+                )
+                pickle.dump(item, f)
+
+    def load_nodes(self, path):
+        self.nodes = {}
+        with open(path, 'rb') as f:
+            while True:
+                try:
+                    item = pickle.load(f)
+                except EOFError:
+                    break
+
+                iterator = iter(item)
+                view = next(iterator)
+                node = self.get_node(view)
+
+                node.score = next(iterator)
+                node.qgames = next(iterator)
+                node.estimation.value = next(iterator)
+                node.estimation.weight = next(iterator)
+                node.result = next(iterator)
+                node.moves = next(iterator)
+                node.children = next(iterator)
+
+        for node in self.nodes.values():
+            node.children = [ self.get_node(view) for view in node.children ]
 
     def dump_nodes(self, nodes=None):
         return dump_nodes(nodes or self.nodes.values())
