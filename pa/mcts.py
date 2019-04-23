@@ -198,12 +198,22 @@ class UcbMoveSelection:
 
 
 class MctsServer:
-    def __init__(self, root_state, *, select_best=RandomMoveSelection()):
+    def __init__(self, root_state, *, game_log=None, select_best=RandomMoveSelection()):
         self.root_state = root_state.copy()
         self.nodes = {}
         self.jobs = {}
         self.current_jid = 0
         self.select_best = select_best
+
+        if game_log is None:
+            self.game_log = None
+            self.own_game_log = False
+        elif type(game_log) == str:
+            self.game_log = open(game_log, 'w')
+            self.own_game_log = True
+        else:
+            self.game_log = game_log
+            self.own_game_log = False
 
     def get_node(self, view):
         node = self.nodes.get(view)
@@ -227,7 +237,7 @@ class MctsServer:
             self.jobs[jid] = job
         return job
 
-    def apply_playout(self, moves, result):
+    def apply_playout(self, moves, result, players=None):
         state = self.root_state.copy()
 
         view = state.get_view(state.active)
@@ -242,6 +252,14 @@ class MctsServer:
             state.do_move(move)
 
         node.result = result[:]
+
+        if self.game_log:
+            log = []
+            if players:
+                log += players
+            log += moves
+            log += [ str(value) for value in result[1:] ]
+            self.game_log.write(' '.join(log) + '\n')
 
     def get_job(self, *, max_playouts=99):
         qplayouts = 0
@@ -308,7 +326,8 @@ class MctsServer:
     def put_playout(self, job, data):
         result = make_result(data.get('result'))
         moves = job.moves + data.get('moves', [])
-        self.apply_playout(moves, result)
+        players = data.get('players')
+        self.apply_playout(moves, result, players)
 
     def put_analize(self, job, data):
         result = make_result(data.get('result'))
