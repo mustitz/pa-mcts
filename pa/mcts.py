@@ -94,7 +94,7 @@ class Estimation:
 class Node:
     def __init__(self, view):
         self.view = view
-        self.locked = False
+        self.locked = None
         self.score = 0
         self.qgames = 0
         self.estimation = Estimation()
@@ -103,15 +103,15 @@ class Node:
         self.children = []
 
     def lock(self):
-        assert not self.locked
-        self.locked = True
+        assert self.locked is None
+        self.locked = time.time()
 
     def unlock(self):
-        assert self.locked
-        self.locked = False
+        assert self.locked is not None
+        self.locked = None
 
     def dump_locked(self):
-        return 'LOCKED' if self.locked else ''
+        return 'LOCKED' if self.locked is not None else ''
 
     def dump_evaluation(self):
         return '{:5.2f}'.format(self.score / self.qgames) if self.qgames > 0 else '  -  '
@@ -283,7 +283,7 @@ class MctsServer:
                 self.apply_playout(moves, node.result)
                 return self.new_job(PLAYOUT_EXCEEDED)
 
-            if node.locked:
+            if node.locked is not None:
                 return self.new_job(WAIT)
 
             if node.qgames == 0:
@@ -294,7 +294,7 @@ class MctsServer:
 
             choices = [ state.view_move(move) for move in node.moves ]
             nodes = [ self.get_node(view) for view in choices ]
-            alternatives = [ node for node in nodes if not node.locked ]
+            alternatives = [ node for node in nodes if node.locked is None]
             if not alternatives:
                 return self.new_job(WAIT)
 
@@ -387,6 +387,19 @@ class MctsServer:
 
         for node in self.nodes.values():
             node.children = [ self.get_node(view) for view in node.children ]
+
+    def remove_old_jobs(self, timeout=60):
+        old_jids = []
+        current = time.time()
+        for job in self.jobs.values():
+            node = job.node
+            if node.locked is None:
+                continue
+            if current - node.locked > timeout:
+                node.locked = None
+                old_jids.append(job.jid)
+        for jid in old_jids:
+            del self.jobs[jid]
 
     def dump_nodes(self, nodes=None):
         return dump_nodes(nodes or self.nodes.values())
